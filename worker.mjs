@@ -10,11 +10,11 @@ export function validateProduct(b){
  if(p.image){try{const u=new URL(p.image);if(u.protocol!=='https:'||u.username||u.password)fail('Use um link HTTPS para a imagem.');}catch{fail('Use um link HTTPS válido para a imagem.');}}
  for(const key of ['featured','published']){if(typeof b[key]!=='boolean')fail('Opção inválida.');p[key]=b[key]?1:0;}return p;
 }
-export function isAdmin(req,env){return Boolean(env.ADMIN_EMAIL&&req.headers.get('oai-authenticated-user-id')&&req.headers.get('oai-authenticated-user-email')?.toLowerCase()===env.ADMIN_EMAIL.toLowerCase());}
+export function isAdmin(req,env){return Boolean(env.ADMIN_EMAIL&&req.headers.get('oai-authenticated-user-email')?.toLowerCase()===env.ADMIN_EMAIL.toLowerCase());}
 async function body(req){if(!req.headers.get('content-type')?.startsWith('application/json'))fail('Envie dados JSON.',415);const raw=await req.text();if(raw.length>12000)fail('Dados muito grandes.',413);try{return JSON.parse(raw);}catch{fail('Dados inválidos.');}}
 export function createWorker(assets,schema){
  let initialized;
- async function init(db){if(!db)fail('Armazenamento indisponível. Tente novamente em instantes.',503);if(!initialized)initialized=db.exec(schema).catch(e=>{initialized=null;throw e;});await initialized;}
+ async function init(db){if(!db)fail('Armazenamento indisponível. Tente novamente em instantes.',503);if(!initialized)initialized=(async()=>{for(const sql of schema.split(';').map(s=>s.trim()).filter(Boolean))await db.prepare(sql).run();})().catch(e=>{initialized=null;throw e;});await initialized;}
  return {async fetch(req,env){
   try{
    const url=new URL(req.url),path=url.pathname;
@@ -59,7 +59,7 @@ export function createWorker(assets,schema){
    }
    if(path==='/admin'||path==='/admin/'){
     if(!isAdmin(req,env)){
-     if(!req.headers.get('oai-authenticated-user-id'))return Response.redirect(url.origin+'/signin-with-chatgpt?return_to=%2Fadmin',302);
+     if(!req.headers.get('oai-authenticated-user-email'))return Response.redirect(url.origin+'/signin-with-chatgpt?return_to=%2Fadmin',302);
      return new Response('<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>Acesso restrito</title><body style="font:18px Arial;padding:40px"><h1>Acesso restrito</h1><p>Entre com a conta administradora para gerenciar a loja.</p><a href="/signout-with-chatgpt?return_to=%2Fadmin">Trocar de conta</a> · <a href="/">Voltar à loja</a></body></html>',{status:403,headers:{'Content-Type':'text/html; charset=utf-8'}});
     }
    }

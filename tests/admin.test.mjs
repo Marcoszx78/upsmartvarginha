@@ -11,6 +11,7 @@ test('protected durable product management, stock, conflicts, archive, themes',a
  assert.equal((await call('/admin','GET',undefined,false)).status,302);
  assert.equal((await call('/api/admin/products','GET',undefined,false)).status,403);
  assert.equal((await call('/admin')).status,200);
+ assert.equal((await w.fetch(new Request('https://store.test/admin',{headers:{'oai-authenticated-user-email':env.ADMIN_EMAIL}}),env)).status,200);
  assert.equal((await call('/admin.html')).status,404);
  const p={name:'iPhone teste <script>',category:'iPhone',description:'128 GB',price:199900,stock:3,low_stock:2,image:'',condition:'Novo',featured:true,published:true};
  assert.equal((await call('/api/admin/products','POST',p,true,'https://evil.test')).status,403);
