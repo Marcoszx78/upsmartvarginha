@@ -1,4 +1,5 @@
 import { hash, compare } from 'bcryptjs';
+import {withProfile,profileRoute} from './profile.mjs';
 
 const duration = 12 * 60 * 60;
 const encoder = new TextEncoder();
@@ -11,7 +12,7 @@ const cookieName = req => new URL(req.url).protocol === 'https:' ? '__Host-up_se
 const cookie = (req, value, age) => `${cookieName(req)}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${age}${new URL(req.url).protocol === 'https:' ? '; Secure' : ''}`;
 const token = req => (req.headers.get('cookie') || '').split(';').map(x=>x.trim()).find(x=>x.startsWith(cookieName(req)+'='))?.slice(cookieName(req).length+1) || '';
 const adminName = env => env.ADMIN_USERNAME?.toLowerCase();
-const publicUser = user => user ? {name:user.name,username:user.username,role:user.role} : null;
+const publicUser = user => user ? {name:user.name,username:user.username,role:user.role,avatar:user.avatar||''} : null;
 
 export async function getSession(req, env) {
   const value = token(req);
@@ -20,10 +21,10 @@ export async function getSession(req, env) {
   if (!session) return null;
   if (session.role === 'admin') {
     if (!env.ADMIN_PASSWORD_HASH || !env.ADMIN_USERNAME || session.account_id !== adminName(env) || session.credential_version !== await digest(env.ADMIN_PASSWORD_HASH)) return null;
-    return {username:adminName(env),name:'Up Smart',role:'admin'};
+    return withProfile(env.DB,{id:adminName(env),username:adminName(env),name:'Up Smart',role:'admin'});
   }
-  const user = await env.DB.prepare('SELECT username,name FROM accounts WHERE id=?').bind(session.account_id).first();
-  return user && {...user, role:'customer'};
+  const user = await env.DB.prepare('SELECT id,username,name,created_at FROM accounts WHERE id=?').bind(session.account_id).first();
+  return user && withProfile(env.DB,{...user, role:'customer'});
 }
 
 async function startSession(req, env, user) {
@@ -34,7 +35,7 @@ async function startSession(req, env, user) {
   const value = Array.from(crypto.getRandomValues(new Uint8Array(32)), b=>b.toString(16).padStart(2,'0')).join('');
   await env.DB.prepare('INSERT INTO account_sessions(token_hash,account_id,role,credential_version,expires_at) VALUES(?,?,?,?,?)')
     .bind(await digest(value),user.id,user.role,user.role==='admin'?await digest(env.ADMIN_PASSWORD_HASH):null,now+duration*1000).run();
-  return response({user:publicUser(user)},200,{'Set-Cookie':cookie(req,value,duration)});
+  return response({user:publicUser(await withProfile(env.DB,user))},200,{'Set-Cookie':cookie(req,value,duration)});
 }
 
 async function limit(db, key, max) {
@@ -46,6 +47,7 @@ async function limit(db, key, max) {
 }
 
 export async function authRoute(req, env, path, readBody) {
+  if(['/api/auth/profile','/api/auth/avatar'].includes(path))return profileRoute(req,env,path,await getSession(req,env),readBody);
   if (path==='/api/auth/session' && req.method==='GET') return response({user:publicUser(await getSession(req,env))});
   if (req.method!=='POST') return response({error:'Método não permitido.'},405);
   if (req.headers.get('origin')!==new URL(req.url).origin) return response({error:'Origem não autorizada.'},403);

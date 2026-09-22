@@ -1,18 +1,32 @@
 (() => {
   const $=s=>document.querySelector(s), form=$('#account-form');
-  let mode='login';
+  let mode='login',currentUser=null;
   const showError=message=>{const el=$('#account-error');if(el){el.textContent=message;el.hidden=!message;}else if(message)alert(message);};
   async function api(path,data){
     const res=await fetch('/api/auth/'+path,data?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}:{});
     let body;try{body=await res.json();}catch{throw new Error('Não foi possível acessar sua conta. Tente novamente.');}
     if(!res.ok)throw new Error(body.error||'Não foi possível continuar.');return body;
   }
-  function render(user){
+  function paint(user){
     document.querySelectorAll('[data-admin-link]').forEach(el=>el.hidden=user?.role!=='admin');
-    document.querySelectorAll('[data-account-link]').forEach(el=>el.textContent=user?'Minha conta':'Entrar');
+    document.querySelectorAll('[data-account-link]').forEach(el=>{
+      el.textContent=user?'Meu perfil':'Entrar';
+      if(!el.classList.contains('header-account'))return;
+      el.setAttribute('aria-label',user?'Abrir meu perfil: '+user.name:'Entrar ou criar conta');
+      const circle=document.createElement('span');circle.className='header-avatar';circle.setAttribute('aria-hidden','true');
+      if(user){circle.textContent=user.name.trim().split(/\s+/).slice(0,2).map(p=>p[0]).join('').toUpperCase();if(user.avatar){const img=new Image();img.alt='';img.src=user.avatar;img.onerror=()=>img.remove();circle.append(img);}}
+      else circle.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="8" r="3.5"/><path d="M5 21v-2a7 7 0 0 1 14 0v2"/></svg>';
+      const label=document.createElement('span');label.className='header-account-label';label.textContent=user?'Meu perfil':'Entrar';el.replaceChildren(circle,label);
+    });
+    if(user&&$('#account-name')){$('#account-name').textContent=user.name;$('#account-username').textContent='@'+user.username;$('#account-role').textContent=user.role==='admin'?'Administrador':'Cliente Up Smart';}
+  }
+  document.addEventListener('up:profile-changed',event=>{if(currentUser){currentUser={...currentUser,...event.detail};paint(currentUser);}});
+  function render(user){
+    currentUser=user;paint(user);
     if(!form)return;
     $('#account-loading').hidden=true;$('#retry-session').hidden=true;$('#auth-forms').hidden=!!user;$('#signed-account').hidden=!user;
-    if(user){$('#account-name').textContent=user.name;$('#account-username').textContent='@'+user.username;$('#account-role').textContent=user.role==='admin'?'Conta administradora da loja.':'Sua conta de cliente está ativa.';}
+    document.body.classList.toggle('profile-active',!!user);
+    document.dispatchEvent(new CustomEvent('up:account',{detail:user}));
   }
   async function load(){try{showError('');const {user}=await api('session');render(user);if(form&&new URLSearchParams(location.search).get('acesso')==='restrito'&&user?.role!=='admin')showError('O painel é exclusivo da administração. Entre com a conta administradora para continuar.');}catch(e){if(form){$('#account-loading').hidden=true;$('#retry-session').hidden=false;showError(e.message);}}}
   if(form){

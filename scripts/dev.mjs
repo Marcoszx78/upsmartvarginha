@@ -1,10 +1,11 @@
 import http from 'node:http';
 import fs from 'node:fs/promises';
 import {database} from './sqlite-adapter.mjs';
+import {localBucket} from './local-bucket.mjs';
 const {default:worker}=await import('../dist/server/index.js');
 await fs.mkdir('work',{recursive:true});
 const localEnv=Object.fromEntries((await fs.readFile('.env','utf8').catch(()=>'' )).split(/\r?\n/).filter(l=>l&&!l.startsWith('#')).map(l=>[l.slice(0,l.indexOf('=')),l.slice(l.indexOf('=')+1)]));
-const env={DB:database('work/local.sqlite'),...localEnv};
+const env={DB:database('work/local.sqlite'),BUCKET:localBucket('work/local-avatars'),...localEnv};
 for(const file of (await fs.readdir('drizzle')).filter(f=>f.endsWith('.sql')).sort()){
  await env.DB.exec(await fs.readFile('drizzle/'+file,'utf8').then(sql=>sql.replaceAll('CREATE TABLE ','CREATE TABLE IF NOT EXISTS ').replaceAll('CREATE UNIQUE INDEX ','CREATE UNIQUE INDEX IF NOT EXISTS ').replaceAll('CREATE INDEX ','CREATE INDEX IF NOT EXISTS ')));
 }

@@ -7,6 +7,17 @@ export const accounts = sqliteTable('accounts', {
   passwordHash: text('password_hash').notNull(),
   createdAt: integer('created_at').notNull(),
 });
+export const profiles = sqliteTable('account_profiles', {
+  key: text('key').primaryKey(),
+  name: text('name').notNull(),
+  email: text('email').notNull().default(''),
+  phone: text('phone').notNull().default(''),
+  city: text('city').notNull().default(''),
+  state: text('state').notNull().default(''),
+  avatarKey: text('avatar_key').notNull().default(''),
+  version: integer('version').notNull().default(1),
+  updatedAt: integer('updated_at').notNull(),
+});
 export const sessions = sqliteTable('account_sessions', {
   tokenHash: text('token_hash').primaryKey(),
   accountId: text('account_id').notNull(),
