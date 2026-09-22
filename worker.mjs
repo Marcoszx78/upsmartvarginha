@@ -1,3 +1,4 @@
+import {getSession,authRoute} from './auth.mjs';
 const json=(data,status=200)=>Response.json(data,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
 const fail=(message,status=400)=>{throw Object.assign(new Error(message),{status});};
 const categories=['iPhone','Xiaomi','PlayStation','Xbox','Acessórios'];
@@ -10,7 +11,6 @@ export function validateProduct(b){
  if(p.image){try{const u=new URL(p.image);if(u.protocol!=='https:'||u.username||u.password)fail('Use um link HTTPS para a imagem.');}catch{fail('Use um link HTTPS válido para a imagem.');}}
  for(const key of ['featured','published']){if(typeof b[key]!=='boolean')fail('Opção inválida.');p[key]=b[key]?1:0;}return p;
 }
-export function isAdmin(req,env){return Boolean(env.ADMIN_EMAIL&&req.headers.get('oai-authenticated-user-email')?.toLowerCase()===env.ADMIN_EMAIL.toLowerCase());}
 async function body(req){if(!req.headers.get('content-type')?.startsWith('application/json'))fail('Envie dados JSON.',415);const raw=await req.text();if(raw.length>12000)fail('Dados muito grandes.',413);try{return JSON.parse(raw);}catch{fail('Dados inválidos.');}}
 export function createWorker(assets,schema){
  let initialized;
@@ -19,13 +19,16 @@ export function createWorker(assets,schema){
   try{
    const url=new URL(req.url),path=url.pathname;
    if(path.startsWith('/api/')){
+    await init(env.DB);
+    if(path.startsWith('/api/auth/'))return await authRoute(req,env,path,body);
     const admin=path.startsWith('/api/admin/');
-    if(admin&&!isAdmin(req,env))return json({error:'Entre com a conta administradora para continuar.'},403);
+    const session=admin?await getSession(req,env):null;
+    if(admin&&session?.role!=='admin')return json({error:'Entre com a conta administradora para continuar.'},403);
     if(!['GET','HEAD'].includes(req.method)){
      if(!admin)fail('Método não permitido.',405);
      if(req.headers.get('origin')!==url.origin)fail('Origem não autorizada.',403);
     }
-    if(path==='/api/admin/session'&&req.method==='GET')return json({name:'Administrador',email:req.headers.get('oai-authenticated-user-email')});
+    if(path==='/api/admin/session'&&req.method==='GET')return json({user:session});
     await init(env.DB);
     const db=env.DB;
     if(path==='/api/catalog'&&req.method==='GET'){
@@ -58,12 +61,11 @@ export function createWorker(assets,schema){
     return json({error:'Endereço não encontrado.'},404);
    }
    if(path==='/admin'||path==='/admin/'){
-    if(!isAdmin(req,env)){
-     if(!req.headers.get('oai-authenticated-user-email'))return Response.redirect(url.origin+'/signin-with-chatgpt?return_to=%2Fadmin',302);
-     return new Response('<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>Acesso restrito</title><body style="font:18px Arial;padding:40px"><h1>Acesso restrito</h1><p>Entre com a conta administradora para gerenciar a loja.</p><a href="/signout-with-chatgpt?return_to=%2Fadmin">Trocar de conta</a> · <a href="/">Voltar à loja</a></body></html>',{status:403,headers:{'Content-Type':'text/html; charset=utf-8'}});
-    }
+    await init(env.DB);
+    const user=await getSession(req,env);
+    if(user?.role!=='admin')return new Response(null,{status:302,headers:{Location:'/conta?acesso=restrito','Cache-Control':'no-store'}});
    }
-   const key=path==='/'?'/index.html':(path==='/admin'||path==='/admin/'?'/admin.html':path);
+   const key=path==='/'?'/index.html':(path==='/conta'||path==='/conta/'?'/account.html':(path==='/admin'||path==='/admin/'?'/admin.html':path));
    if(path==='/admin.html')return new Response('Não encontrado',{status:404});
    const asset=assets[path==='/admin'||path==='/admin/'?'/admin.html':key];
    if(!asset)return new Response('Não encontrado',{status:404});
