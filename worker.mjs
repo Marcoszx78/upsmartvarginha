@@ -1,5 +1,6 @@
 import {getSession,authRoute} from './auth.mjs';
 import {details,applyVariants,unpack,productSelect,commerceRoute} from './commerce.mjs';
+import {mediaPath,mediaRoute} from './media.mjs';
 const json=(data,status=200)=>Response.json(data,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
 const fail=(message,status=400)=>{throw Object.assign(new Error(message),{status});};
 const categories=['iPhone','Xiaomi','PlayStation','Xbox','Acessórios'];
@@ -9,7 +10,7 @@ function text(v,max,label,required=false){if(typeof v!=='string'||v.length>max||
 export function validateProduct(b){
  const p={name:text(b.name,120,'Nome',true),category:b.category,description:text(b.description,2000,'Descrição'),price:b.price===null?null:integer(b.price,0,100000000,'Preço'),stock:integer(b.stock,0,1000000,'Estoque'),low_stock:integer(b.low_stock,0,1000000,'Limite'),image:text(b.image,2000,'Imagem'),condition:b.condition};
  if(!categories.includes(p.category)||!conditions.includes(p.condition))fail('Categoria ou condição inválida.');
- if(p.image){try{const u=new URL(p.image);if(u.protocol!=='https:'||u.username||u.password)fail('Use um link HTTPS para a imagem.');}catch{fail('Use um link HTTPS válido para a imagem.');}}
+ if(p.image&&!mediaPath.test(p.image)){try{const u=new URL(p.image);if(u.protocol!=='https:'||u.username||u.password)fail('Foto inválida. Envie a foto novamente.');}catch{fail('Foto inválida. Envie a foto novamente.');}}
  for(const key of ['featured','published']){if(typeof b[key]!=='boolean')fail('Opção inválida.');p[key]=b[key]?1:0;}return p;
 }
 async function body(req){if(!req.headers.get('content-type')?.startsWith('application/json'))fail('Envie dados JSON.',415);const raw=await req.text();if(raw.length>50000)fail('Dados muito grandes.',413);try{const b=JSON.parse(raw);if(!b||typeof b!=='object'||Array.isArray(b))throw 0;return b;}catch{fail('Dados inválidos.');}}
@@ -32,6 +33,7 @@ export function createWorker(assets,schema){
     if(path==='/api/admin/session'&&req.method==='GET')return json({user:session});
     await init(env.DB);
     const db=env.DB;
+    if(path==='/api/admin/media'||mediaPath.test(path))return await mediaRoute(req,env,path);
     const commerce=await commerceRoute(req,env,path,session,body);if(commerce)return commerce;
     if(path==='/api/catalog'&&req.method==='GET'){
      const results=await db.prepare(productSelect+' WHERE p.archived=0 AND p.published=1 ORDER BY p.featured DESC,p.created_at DESC').all();

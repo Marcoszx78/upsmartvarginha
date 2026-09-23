@@ -1,0 +1,30 @@
+{
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "rewrites": [
+    {
+      "source": "/conta",
+      "destination": "/account.html"
+    },
+    {
+      "source": "/conta/",
+      "destination": "/account.html"
+    },
+    {
+      "source": "/admin",
+      "destination": "/admin.html"
+    },
+    {
+      "source": "/admin/",
+      "destination": "/admin.html"
+    },
+    {
+      "source": "/produto/:id",
+      "destination": "/product.html"
+    },
+    {
+      "source": "/api/:path*",
+      "destination": "/api"
+    }
+  ]
+}

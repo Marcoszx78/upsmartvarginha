@@ -1,0 +1,23 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import {hash} from 'bcryptjs';
+import {createWorker} from '../worker.mjs';
+import {database} from '../scripts/sqlite-adapter.mjs';
+test('only administrators upload validated bounded photos; stored photos remain readable after restart',async()=>{
+ const DB=database(),objects=new Map(),BUCKET={async put(k,v){objects.set(k,v);},async get(k){return objects.has(k)?{body:objects.get(k)}:null;}};
+ for(const f of (await fs.readdir('drizzle')).filter(x=>x.endsWith('.sql')).sort())await DB.exec(await fs.readFile('drizzle/'+f,'utf8'));
+ const schema=await fs.readFile('db/schema.sql','utf8'),env={DB,BUCKET,ADMIN_USERNAME:'testadmin',ADMIN_PASSWORD_HASH:await hash('password-test',10)},w=createWorker({},schema);
+ const call=(path,body,cookie='',type='application/json',origin='https://shop.test')=>w.fetch(new Request('https://shop.test'+path,{method:body===undefined?'GET':'POST',headers:{Cookie:cookie,Origin:origin,'Content-Type':type},body}),env);
+ const login=await call('/api/auth/login',JSON.stringify({username:'testadmin',password:'password-test'})),admin=login.headers.get('set-cookie').split(';')[0];
+ const reg=await call('/api/auth/register',JSON.stringify({username:'client_test',name:'Teste',password:'customer-test'})),customer=reg.headers.get('set-cookie').split(';')[0];
+ const jpg=new Uint8Array([255,216,255,224,1,2,3,255,217]);
+ assert.equal((await call('/api/admin/media',jpg,'','image/jpeg')).status,403);assert.equal((await call('/api/admin/media',jpg,customer,'image/jpeg')).status,403);
+ assert.equal((await call('/api/admin/media',jpg,admin,'image/jpeg','https://evil.test')).status,403);assert.equal((await call('/api/admin/media','<svg/>',admin,'image/svg+xml')).status,415);
+ assert.equal((await call('/api/admin/media','bad-image',admin,'image/jpeg')).status,400);assert.equal((await call('/api/admin/media',new Uint8Array(1024*1024+1),admin,'image/jpeg')).status,413);
+ const upload=await call('/api/admin/media',jpg,admin,'image/jpeg');assert.equal(upload.status,201);const {url}=await upload.json();assert.match(url,/^\/api\/media\/[a-f0-9-]+\.jpg$/);assert.equal(objects.size,1);
+ const fresh=createWorker({},schema),read=await fresh.fetch(new Request('https://shop.test'+url),env);assert.equal(read.status,200);assert.equal(read.headers.get('content-type'),'image/jpeg');assert.equal(read.headers.get('x-content-type-options'),'nosniff');assert.deepEqual(new Uint8Array(await read.arrayBuffer()),jpg);
+ const p={name:'Foto enviada',category:'Xiaomi',condition:'Novo',description:'',price:null,stock:1,low_stock:2,image:url,featured:false,published:true,details:{gallery:[url]}};
+ const saved=await call('/api/admin/products',JSON.stringify(p),admin);assert.equal(saved.status,201);assert.equal((await saved.json()).product.image,url);
+ assert.equal((await call('/api/media/00000000-0000-0000-0000-000000000000.jpg')).status,404);DB.close();
+});

@@ -1,7 +1,8 @@
+import {mediaPath} from './media.mjs';
 const fail=(message,status=400)=>{throw Object.assign(new Error(message),{status});};
 const json=(data,status=200)=>Response.json(data,{status,headers:{'Cache-Control':'no-store'}});
 const str=(v,max=500)=>{if(typeof v!=='string'||v.length>max)fail('Texto inválido ou muito longo.');return v.trim();};
-function url(v){v=str(v,2000);if(v){try{const u=new URL(v);if(u.protocol!=='https:'||u.username||u.password)throw 0;}catch{fail('As fotos precisam de links HTTPS válidos.');}}return v;}
+function url(v){v=str(v,2000);if(v&&!mediaPath.test(v)){try{const u=new URL(v);if(u.protocol!=='https:'||u.username||u.password)throw 0;}catch{fail('Foto inválida. Envie a foto novamente.');}}return v;}
 export function details(input={}){
  if(!input||typeof input!=='object'||Array.isArray(input))fail('Detalhes inválidos.');
  const d={gallery:[],capacity:str(input.capacity??'',80),color:str(input.color??'',80),warranty:str(input.warranty??'',1000),specs:str(input.specs??'',3000),battery:input.battery??null,variants:[]};
