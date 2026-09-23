@@ -1,5 +1,6 @@
 import { hash, compare } from 'bcryptjs';
 import {withProfile,profileRoute} from './profile.mjs';
+import {effectiveHash,securityRoute} from './security.mjs';
 
 const duration = 12 * 60 * 60;
 const encoder = new TextEncoder();
@@ -20,10 +21,11 @@ export async function getSession(req, env) {
   const session = await env.DB.prepare('SELECT * FROM account_sessions WHERE token_hash=? AND expires_at>?').bind(await digest(value), Date.now()).first();
   if (!session) return null;
   if (session.role === 'admin') {
-    if (!env.ADMIN_PASSWORD_HASH || !env.ADMIN_USERNAME || session.account_id !== adminName(env) || session.credential_version !== await digest(env.ADMIN_PASSWORD_HASH)) return null;
+    if (!env.ADMIN_PASSWORD_HASH || !env.ADMIN_USERNAME || session.account_id !== adminName(env) || session.credential_version !== await digest(await effectiveHash(env.DB,'admin:'+adminName(env),env.ADMIN_PASSWORD_HASH))) return null;
     return withProfile(env.DB,{id:adminName(env),username:adminName(env),name:'Up Smart',role:'admin'});
   }
-  const user = await env.DB.prepare('SELECT id,username,name,created_at FROM accounts WHERE id=?').bind(session.account_id).first();
+  const user = await env.DB.prepare('SELECT * FROM accounts WHERE id=?').bind(session.account_id).first();
+  if(user){const effective=await effectiveHash(env.DB,'customer:'+user.id,user.password_hash);if(session.credential_version?session.credential_version!==await digest(effective):effective!==user.password_hash)return null;delete user.password_hash;}
   return user && withProfile(env.DB,{...user, role:'customer'});
 }
 
@@ -34,7 +36,7 @@ async function startSession(req, env, user) {
   if (old) await env.DB.prepare('DELETE FROM account_sessions WHERE token_hash=?').bind(await digest(old)).run();
   const value = Array.from(crypto.getRandomValues(new Uint8Array(32)), b=>b.toString(16).padStart(2,'0')).join('');
   await env.DB.prepare('INSERT INTO account_sessions(token_hash,account_id,role,credential_version,expires_at) VALUES(?,?,?,?,?)')
-    .bind(await digest(value),user.id,user.role,user.role==='admin'?await digest(env.ADMIN_PASSWORD_HASH):null,now+duration*1000).run();
+    .bind(await digest(value),user.id,user.role,await digest(await effectiveHash(env.DB,user.role+':'+user.id,user.role==='admin'?env.ADMIN_PASSWORD_HASH:user.password_hash)),now+duration*1000).run();
   return response({user:publicUser(await withProfile(env.DB,user))},200,{'Set-Cookie':cookie(req,value,duration)});
 }
 
@@ -56,6 +58,7 @@ export async function authRoute(req, env, path, readBody) {
     if(value) await env.DB.prepare('DELETE FROM account_sessions WHERE token_hash=?').bind(await digest(value)).run();
     return response({ok:true},200,{'Set-Cookie':cookie(req,'',0)});
   }
+  if(['/api/auth/recovery-key','/api/auth/reset-password'].includes(path))return securityRoute(req,env,path,await getSession(req,env),readBody,limit);
   if (!['/api/auth/login','/api/auth/register'].includes(path)) return response({error:'Endereço não encontrado.'},404);
   if (!env.ADMIN_USERNAME || !env.ADMIN_PASSWORD_HASH) error('Login indisponível no momento. Tente novamente mais tarde.',503);
   const b=await readBody(req);
@@ -77,12 +80,13 @@ export async function authRoute(req, env, path, readBody) {
     const passwordHash=await hash(b.password,12);
     const result=await db.prepare('INSERT OR IGNORE INTO accounts(id,username,name,password_hash,created_at) VALUES(?,?,?,?,?)').bind(user.id,username,name,passwordHash,Date.now()).run();
     if(!result.meta.changes) error('Este usuário não está disponível. Escolha outro.',409);
-    return startSession(req,env,user);
+    return startSession(req,env,{...user,password_hash:passwordHash});
   }
   const isAdmin=username===adminName(env);
   const account=isAdmin?null:await db.prepare('SELECT * FROM accounts WHERE username=?').bind(username).first();
   // Use a real hash for unknown users too, so verification always performs the same work.
-  const verified=await compare(b.password,isAdmin?env.ADMIN_PASSWORD_HASH:(account?.password_hash||env.ADMIN_PASSWORD_HASH));
+  const base=isAdmin?env.ADMIN_PASSWORD_HASH:(account?.password_hash||env.ADMIN_PASSWORD_HASH);
+  const verified=await compare(b.password,await effectiveHash(db,(isAdmin?'admin:':'customer:')+(isAdmin?username:account?.id||'unknown'),base));
   if(!verified||(!isAdmin&&!account)) error('Usuário ou senha incorretos.',401);
   await db.prepare('DELETE FROM auth_attempts WHERE key=?').bind('user:'+await digest(username)).run();
   return startSession(req,env,isAdmin?{id:username,username,name:'Up Smart',role:'admin'}:{...account,role:'customer'});

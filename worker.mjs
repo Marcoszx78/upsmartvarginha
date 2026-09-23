@@ -1,4 +1,5 @@
 import {getSession,authRoute} from './auth.mjs';
+import {details,applyVariants,unpack,productSelect,commerceRoute} from './commerce.mjs';
 const json=(data,status=200)=>Response.json(data,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
 const fail=(message,status=400)=>{throw Object.assign(new Error(message),{status});};
 const categories=['iPhone','Xiaomi','PlayStation','Xbox','Acessórios'];
@@ -11,7 +12,7 @@ export function validateProduct(b){
  if(p.image){try{const u=new URL(p.image);if(u.protocol!=='https:'||u.username||u.password)fail('Use um link HTTPS para a imagem.');}catch{fail('Use um link HTTPS válido para a imagem.');}}
  for(const key of ['featured','published']){if(typeof b[key]!=='boolean')fail('Opção inválida.');p[key]=b[key]?1:0;}return p;
 }
-async function body(req){if(!req.headers.get('content-type')?.startsWith('application/json'))fail('Envie dados JSON.',415);const raw=await req.text();if(raw.length>12000)fail('Dados muito grandes.',413);try{return JSON.parse(raw);}catch{fail('Dados inválidos.');}}
+async function body(req){if(!req.headers.get('content-type')?.startsWith('application/json'))fail('Envie dados JSON.',415);const raw=await req.text();if(raw.length>50000)fail('Dados muito grandes.',413);try{const b=JSON.parse(raw);if(!b||typeof b!=='object'||Array.isArray(b))throw 0;return b;}catch{fail('Dados inválidos.');}}
 export function createWorker(assets,schema){
  let initialized;
  async function init(db){if(!db)fail('Armazenamento indisponível. Tente novamente em instantes.',503);if(!initialized)initialized=(async()=>{for(const sql of schema.split(';').map(s=>s.trim()).filter(Boolean))await db.prepare(sql).run();})().catch(e=>{initialized=null;throw e;});await initialized;}
@@ -22,31 +23,32 @@ export function createWorker(assets,schema){
     await init(env.DB);
     if(path.startsWith('/api/auth/'))return await authRoute(req,env,path,body);
     const admin=path.startsWith('/api/admin/');
-    const session=admin?await getSession(req,env):null;
+    const session=admin||path.startsWith('/api/favorites')?await getSession(req,env):null;
     if(admin&&session?.role!=='admin')return json({error:'Entre com a conta administradora para continuar.'},403);
     if(!['GET','HEAD'].includes(req.method)){
-     if(!admin)fail('Método não permitido.',405);
+     if(!admin&&!path.startsWith('/api/favorites'))fail('Método não permitido.',405);
      if(req.headers.get('origin')!==url.origin)fail('Origem não autorizada.',403);
     }
     if(path==='/api/admin/session'&&req.method==='GET')return json({user:session});
     await init(env.DB);
     const db=env.DB;
+    const commerce=await commerceRoute(req,env,path,session,body);if(commerce)return commerce;
     if(path==='/api/catalog'&&req.method==='GET'){
-     const results=await db.prepare('SELECT id,name,category,description,price,stock,image,condition,featured FROM products WHERE archived=0 AND published=1 ORDER BY featured DESC,created_at DESC').all();
-     return json({products:results.results,settings:await db.prepare('SELECT theme,accent FROM settings WHERE id=1').first()});
+     const results=await db.prepare(productSelect+' WHERE p.archived=0 AND p.published=1 ORDER BY p.featured DESC,p.created_at DESC').all();
+     return json({products:results.results.map(unpack),settings:await db.prepare('SELECT theme,accent FROM settings WHERE id=1').first()});
     }
-    if(path==='/api/admin/products'&&req.method==='GET')return json({products:(await db.prepare('SELECT * FROM products ORDER BY created_at DESC').all()).results});
+    if(path==='/api/admin/products'&&req.method==='GET')return json({products:(await db.prepare(productSelect+' ORDER BY p.created_at DESC').all()).results.map(unpack)});
     if(path==='/api/admin/products'&&req.method==='POST'){
-     const p=validateProduct(await body(req));const id=crypto.randomUUID(),now=new Date().toISOString();
-     await db.prepare('INSERT INTO products(id,name,category,description,price,stock,low_stock,image,condition,featured,published,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').bind(id,...Object.values(p),now,now).run();
-     return json({product:await db.prepare('SELECT * FROM products WHERE id=?').bind(id).first()},201);
+     const b=await body(req),d=details(b.details),p=applyVariants(validateProduct(b),d);const id=crypto.randomUUID(),now=new Date().toISOString();
+     await db.batch([db.prepare('INSERT INTO products(id,name,category,description,price,stock,low_stock,image,condition,featured,published,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').bind(id,...Object.values(p),now,now),db.prepare('INSERT INTO product_details(product_id,data) VALUES(?,?)').bind(id,JSON.stringify(d))]);
+     return json({product:unpack(await db.prepare(productSelect+' WHERE p.id=?').bind(id).first())},201);
     }
     const match=path.match(/^\/api\/admin\/products\/([a-zA-Z0-9-]+)$/);
     if(match&&req.method==='PUT'){
-     const b=await body(req),p=validateProduct(b);integer(b.version,1,1e9,'Versão');
-     const r=await db.prepare('UPDATE products SET name=?,category=?,description=?,price=?,stock=?,low_stock=?,image=?,condition=?,featured=?,published=?,updated_at=?,version=version+1 WHERE id=? AND version=? AND archived=0').bind(...Object.values(p),new Date().toISOString(),match[1],b.version).run();
+     const b=await body(req),d=details(b.details),p=applyVariants(validateProduct(b),d);integer(b.version,1,1e9,'Versão');
+     const [r]=await db.batch([db.prepare('UPDATE products SET name=?,category=?,description=?,price=?,stock=?,low_stock=?,image=?,condition=?,featured=?,published=?,updated_at=?,version=version+1 WHERE id=? AND version=? AND archived=0').bind(...Object.values(p),new Date().toISOString(),match[1],b.version),db.prepare('INSERT INTO product_details(product_id,data) SELECT ?,? WHERE changes()>0 ON CONFLICT(product_id) DO UPDATE SET data=excluded.data').bind(match[1],JSON.stringify(d))]);
      if(!r.meta.changes)fail('Este produto mudou em outra aba. Atualize a lista e tente novamente.',409);
-     return json({product:await db.prepare('SELECT * FROM products WHERE id=?').bind(match[1]).first()});
+     return json({product:unpack(await db.prepare(productSelect+' WHERE p.id=?').bind(match[1]).first())});
     }
     if(match&&req.method==='PATCH'){
      const b=await body(req);if(typeof b.archived!=='boolean')fail('Ação inválida.');integer(b.version,1,1e9,'Versão');
@@ -65,7 +67,7 @@ export function createWorker(assets,schema){
     const user=await getSession(req,env);
     if(user?.role!=='admin')return new Response(null,{status:302,headers:{Location:'/conta?acesso=restrito','Cache-Control':'no-store'}});
    }
-   const key=path==='/'?'/index.html':(path==='/conta'||path==='/conta/'?'/account.html':(path==='/admin'||path==='/admin/'?'/admin.html':path));
+   const key=path==='/'?'/index.html':(/^\/produto\/[a-zA-Z0-9-]+\/?$/.test(path)?'/product.html':(path==='/conta'||path==='/conta/'?'/account.html':(path==='/admin'||path==='/admin/'?'/admin.html':path)));
    if(path==='/admin.html')return new Response('Não encontrado',{status:404});
    const asset=assets[path==='/admin'||path==='/admin/'?'/admin.html':key];
    if(!asset)return new Response('Não encontrado',{status:404});
