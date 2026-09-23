@@ -17,23 +17,22 @@ export function details(input={}){
 export function applyVariants(p,d){if(d.variants.length){p.stock=d.variants.reduce((n,v)=>n+v.stock,0);if(p.stock>1000000)fail('Estoque total muito grande.');p.price=d.variants.some(v=>v.price===null)?null:Math.min(...d.variants.map(v=>v.price));}return p;}
 export const unpack=p=>{if(!p)return null;const {detail_json,...product}=p;return {...product,details:detail_json?JSON.parse(detail_json):details()};};
 export const productSelect='SELECT p.*,d.data AS detail_json FROM products p LEFT JOIN product_details d ON p.id=d.product_id';
-function storeContent(b){
- if(!b||typeof b!=='object')fail('Informações inválidas.');
- const content={};for(const k of ['warranty','delivery','pickup','payment','hours','teamText'])content[k]=str(b[k]??'',2000);
- if(!Array.isArray(b.teamPhotos??[])||(b.teamPhotos??[]).length>4)fail('Use até quatro fotos da equipe.');content.teamPhotos=(b.teamPhotos??[]).map(url).filter(Boolean);
+function reviewContent(b){
+ if(!b||typeof b!=='object'||Array.isArray(b))fail('Avaliações inválidas.');
+ const content={};
  if(!Array.isArray(b.reviews??[])||(b.reviews??[]).length>10)fail('Use até dez avaliações.');
- content.reviews=(b.reviews??[]).map(r=>{const name=str(r.name,80),text=str(r.text,1000);if(!name||!text||r.approved!==true)fail('Publique apenas avaliações com nome, texto e autorização confirmada.');return {name,text,approved:true};});return content;
+ content.reviews=(b.reviews??[]).map(r=>{if(!r||typeof r!=='object')fail('Avaliação inválida.');const name=str(r.name,80),text=str(r.text,1000);if(!name||!text||r.approved!==true)fail('Publique apenas avaliações com nome, texto e autorização confirmada.');return {name,text,approved:true};});return content;
 }
 export async function commerceRoute(req,env,path,user,readBody){
  const db=env.DB,method=req.method;
  const product=path.match(/^\/api\/products\/([a-zA-Z0-9-]+)$/);
  if(product&&method==='GET'){const p=unpack(await db.prepare(productSelect+' WHERE p.id=? AND p.archived=0 AND p.published=1').bind(product[1]).first());if(!p)fail('Este produto não está disponível na vitrine.',404);return json({product:p});}
- if(path==='/api/store'&&method==='GET'){const row=await db.prepare('SELECT data FROM store_content WHERE id=1').first();return json(row?JSON.parse(row.data):{});}
- if(path==='/api/admin/store'){
+ if(path==='/api/reviews'&&method==='GET'){const row=await db.prepare('SELECT data FROM store_content WHERE id=1').first();return json({reviews:(row?JSON.parse(row.data).reviews:[])?.filter(r=>r.approved===true)||[]});}
+ if(path==='/api/admin/reviews'){
   if(user?.role!=='admin')fail('Acesso restrito.',403);
   const row=await db.prepare('SELECT * FROM store_content WHERE id=1').first();
-  if(method==='GET')return json({content:row?JSON.parse(row.data):{},version:row?.version??0});
-  if(method==='PUT'){const b=await readBody(req),content=storeContent(b.content);if(!Number.isInteger(b.version)||b.version<0)fail('Versão inválida.');const data=JSON.stringify(content);const r=b.version===0?await db.prepare('INSERT OR IGNORE INTO store_content(id,data,version) VALUES(1,?,1)').bind(data).run():await db.prepare('UPDATE store_content SET data=?,version=version+1 WHERE id=1 AND version=?').bind(data,b.version).run();if(!r.meta.changes)fail('As informações mudaram em outra aba. Reabra esta seção para atualizar.',409);return json({content,version:b.version+1});}
+  if(method==='GET')return json({content:{reviews:row?JSON.parse(row.data).reviews||[]:[]},version:row?.version??0});
+  if(method==='PUT'){const b=await readBody(req),content=reviewContent(b.content);if(!Number.isInteger(b.version)||b.version<0)fail('Versão inválida.');const data=JSON.stringify({...row?JSON.parse(row.data):{},...content});const r=b.version===0?await db.prepare('INSERT OR IGNORE INTO store_content(id,data,version) VALUES(1,?,1)').bind(data).run():await db.prepare('UPDATE store_content SET data=?,version=version+1 WHERE id=1 AND version=?').bind(data,b.version).run();if(!r.meta.changes)fail('As avaliações mudaram em outra aba. Reabra esta seção para atualizar.',409);return json({content,version:b.version+1});}
   fail('Método não permitido.',405);
  }
  if(path==='/api/favorites'||path.startsWith('/api/favorites/')){

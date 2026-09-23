@@ -69,7 +69,7 @@ export function createWorker(assets,schema){
     const user=await getSession(req,env);
     if(user?.role!=='admin')return new Response(null,{status:302,headers:{Location:'/conta?acesso=restrito','Cache-Control':'no-store'}});
    }
-   const key=path==='/'?'/index.html':(/^\/produto\/[a-zA-Z0-9-]+\/?$/.test(path)?'/product.html':(path==='/conta'||path==='/conta/'?'/account.html':(path==='/admin'||path==='/admin/'?'/admin.html':path)));
+   const key=path==='/'?'/index.html':path==='/comparar'||path==='/comparar/'?'/compare.html':(/^\/produto\/[a-zA-Z0-9-]+\/?$/.test(path)?'/product.html':(path==='/conta'||path==='/conta/'?'/account.html':(path==='/admin'||path==='/admin/'?'/admin.html':path)));
    if(path==='/admin.html')return new Response('Não encontrado',{status:404});
    const asset=assets[path==='/admin'||path==='/admin/'?'/admin.html':key];
    if(!asset)return new Response('Não encontrado',{status:404});

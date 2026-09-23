@@ -2,7 +2,7 @@
  let pending=0;
  const $=s=>document.querySelector(s);
  window.adminPhotosBusy=()=>pending>0;
- const lock=on=>{for(const el of document.querySelectorAll('#save-product,#save-store,[data-close="product-dialog"]')){if(on){el.dataset.uploadWasDisabled=String(el.disabled);el.disabled=true;}else{el.disabled=el.dataset.uploadWasDisabled==='true';delete el.dataset.uploadWasDisabled;}}};
+ const lock=on=>{for(const el of document.querySelectorAll('#save-product,[data-close="product-dialog"]')){if(on){el.dataset.uploadWasDisabled=String(el.disabled);el.disabled=true;}else{el.disabled=el.dataset.uploadWasDisabled==='true';delete el.dataset.uploadWasDisabled;}}};
  $('#product-dialog').addEventListener('cancel',e=>{if(pending)e.preventDefault();});
  async function prepare(file){
   if(!['image/jpeg','image/png','image/webp'].includes(file.type))throw Error('Escolha uma foto JPG, PNG ou WebP.');
@@ -26,7 +26,7 @@
   };
   return ()=>{epoch++;status.textContent='';render();};
  }
- const main=picker($('#product-form').elements.image,'Foto principal',1),gallery=picker($('#detail-gallery'),'Galeria do produto',5),team=picker($('#store-form').elements.teamPhotos,'Fotos da equipe',4);
+ const main=picker($('#product-form').elements.image,'Foto principal',1),gallery=picker($('#detail-gallery'),'Galeria do produto',5);
  const populate=window.populateProductDetails;window.populateProductDetails=p=>{populate(p);main();gallery();};
- const load=window.loadStoreContent;window.loadStoreContent=async()=>{await load();team();};$('#reload-store').onclick=window.loadStoreContent;
+
 })();

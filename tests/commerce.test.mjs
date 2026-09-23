@@ -23,10 +23,14 @@ test('product options save atomically, public visibility, private persistent fav
  await call(favorite,'DELETE',undefined,b);assert.equal((await (await call('/api/favorites','GET',undefined,a)).json()).products.length,1);
  assert.equal((await call(edit,'PUT',{...p,version:2,published:false},admin)).status,200);assert.equal((await call(detail)).status,404);
  const hidden=(await (await call('/api/favorites','GET',undefined,a)).json()).products[0];assert.equal(hidden.available,false);assert.equal(hidden.image,undefined);assert.equal(hidden.price,undefined);assert.equal((await call(favorite,'PUT',undefined,b)).status,404);
- assert.equal((await call('/api/admin/store','PUT',{version:0,content:{warranty:'Confirmado'}},a)).status,403);
- assert.equal((await call('/api/admin/store','PUT',{version:0,content:{reviews:[{name:'Pessoa',text:'Teste',approved:false}]}},admin)).status,400);
- assert.equal((await call('/api/admin/store','PUT',{version:0,content:{pickup:'Retirada confirmada',reviews:[{name:'Pessoa',text:'Teste autorizado',approved:true}]}},admin)).status,200);
- assert.equal((await (await call('/api/store')).json()).pickup,'Retirada confirmada');assert.equal((await call('/api/admin/store','PUT',{version:0,content:{}},admin)).status,409);DB.close();
+ assert.equal((await call('/api/admin/reviews','PUT',{version:0,content:{reviews:[]}},a)).status,403);
+ assert.equal((await call('/api/admin/reviews','PUT',{version:0,content:{reviews:[{name:'Pessoa',text:'Teste',approved:false}]}},admin)).status,400);
+ await DB.prepare('INSERT INTO store_content(id,data,version) VALUES(1,?,1)').bind(JSON.stringify({pickup:'Retirada antiga',reviews:[]})).run();
+ assert.equal((await call('/api/admin/reviews','PUT',{version:1,content:{reviews:[{name:'Pessoa',text:'Teste autorizado',approved:true}]}},admin)).status,200);
+ const reviews=await (await call('/api/reviews')).json();assert.equal(reviews.reviews[0].text,'Teste autorizado');assert.equal(reviews.pickup,undefined);
+ assert.equal((await call('/api/store')).status,404);assert.equal((await call('/api/admin/store','GET',undefined,admin)).status,404);
+ assert.equal(JSON.parse((await DB.prepare('SELECT data FROM store_content WHERE id=1').first()).data).pickup,'Retirada antiga');
+ assert.equal((await call('/api/admin/reviews','PUT',{version:1,content:{reviews:[]}},admin)).status,409);DB.close();
 });
 test('recovery key requires current password, hashed storage, single use, session revocation and admin parity',async()=>{
  const {DB,env,call,admin}=await setup();
