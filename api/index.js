@@ -40,6 +40,27 @@ function getEnv() {
   };
 }
 
+async function readReqBody(req) {
+  if (req.body !== undefined && req.body !== null) {
+    if (Buffer.isBuffer(req.body)) return req.body;
+    if (typeof req.body === 'string') return Buffer.from(req.body);
+    if (typeof req.body === 'object') return Buffer.from(JSON.stringify(req.body));
+  }
+  if (typeof req[Symbol.asyncIterator] === 'function') {
+    const chunks = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    return Buffer.concat(chunks);
+  }
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on('data', chunk => chunks.push(chunk));
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
 export default async function handler(req, res) {
   try {
     const proto = req.headers['x-forwarded-proto'] || 'https';
@@ -48,11 +69,7 @@ export default async function handler(req, res) {
 
     let body = null;
     if (!['GET', 'HEAD'].includes(req.method)) {
-      const chunks = [];
-      for await (const chunk of req) {
-        chunks.push(chunk);
-      }
-      body = Buffer.concat(chunks);
+      body = await readReqBody(req);
     }
 
     const headers = new Headers();
