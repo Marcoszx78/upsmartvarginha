@@ -36,7 +36,7 @@
       document.querySelectorAll('[data-account-mode]').forEach(b=>b.setAttribute('aria-pressed',String(b===button)));
       $('#name-field').hidden=!registering;form.elements.name.disabled=!registering;form.elements.name.required=registering;
       $('#confirm-field').hidden=!registering;form.elements.confirmation.disabled=!registering;form.elements.confirmation.required=registering;
-      $('#password-hint').hidden=!registering;form.elements.password.autocomplete=registering?'new-password':'current-password';
+      $('#password-hint').hidden=!registering;$('#registration-privacy').hidden=!registering;form.elements.password.autocomplete=registering?'new-password':'current-password';
       $('#form-heading').textContent=registering?'Sua conta começa aqui.':'Bem-vindo de volta.';
       $('#form-description').textContent=registering?'Escolha um usuário e uma senha para entrar.':'Informe seu usuário e sua senha.';
       $('#account-submit').textContent=registering?'Criar minha conta ↗':'Entrar na conta ↗';
