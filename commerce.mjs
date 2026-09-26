@@ -21,7 +21,7 @@ function reviewContent(b){
  if(!b||typeof b!=='object'||Array.isArray(b))fail('Avaliações inválidas.');
  const content={};
  if(!Array.isArray(b.reviews??[])||(b.reviews??[]).length>10)fail('Use até dez avaliações.');
- content.reviews=(b.reviews??[]).map(r=>{if(!r||typeof r!=='object')fail('Avaliação inválida.');const name=str(r.name,80),text=str(r.text,1000);if(!name||!text||r.approved!==true)fail('Publique apenas avaliações com nome, texto e autorização confirmada.');return {name,text,approved:true};});return content;
+ content.reviews=(b.reviews??[]).map(r=>{if(!r||typeof r!=='object')fail('Avaliação inválida.');const name=str(r.name,80),text=str(r.text,1000),rating=r.rating??null;if(rating!==null&&(!Number.isInteger(rating)||rating<1||rating>5))fail('Escolha uma nota de 1 a 5 estrelas.');if(!name||!text||r.approved!==true)fail('Publique apenas avaliações com nome, texto e autorização confirmada.');return {name,text,rating,approved:true};});return content;
 }
 export async function commerceRoute(req,env,path,user,readBody){
  const db=env.DB,method=req.method;

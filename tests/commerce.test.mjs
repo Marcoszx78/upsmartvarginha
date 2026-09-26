@@ -32,6 +32,23 @@ test('product options save atomically, public visibility, private persistent fav
  assert.equal(JSON.parse((await DB.prepare('SELECT data FROM store_content WHERE id=1').first()).data).pickup,'Retirada antiga');
  assert.equal((await call('/api/admin/reviews','PUT',{version:1,content:{reviews:[]}},admin)).status,409);DB.close();
 });
+test('review ratings persist from 1 to 5, reject invalid scores and preserve unrated reviews',async()=>{
+ const {DB,call,admin}=await setup();
+ try{
+  const review={name:'Cliente de teste',text:'Depoimento de teste',approved:true};
+  for(const rating of [0,6,2.5,'5',true,{},[]]){
+   const r=await call('/api/admin/reviews','PUT',{version:0,content:{reviews:[{...review,rating}]}},admin);assert.equal(r.status,400);
+  }
+  const reviews=[review,...[1,2,3,4,5].map(rating=>({...review,rating}))];
+  const saved=await call('/api/admin/reviews','PUT',{version:0,content:{reviews}},admin);assert.equal(saved.status,200);
+  assert.deepEqual((await (await call('/api/reviews')).json()).reviews.map(r=>r.rating),[null,1,2,3,4,5]);
+  const loaded=await (await call('/api/admin/reviews','GET',undefined,admin)).json();assert.equal(loaded.content.reviews[5].rating,5);
+  loaded.content.reviews[5].rating=null;
+  assert.equal((await call('/api/admin/reviews','PUT',loaded,admin)).status,200);
+  assert.equal((await (await call('/api/reviews')).json()).reviews[5].rating,null);
+ }finally{DB.close();}
+});
+
 test('recovery key requires current password, hashed storage, single use, session revocation and admin parity',async()=>{
  const {DB,env,call,admin}=await setup();
  const original='customer-test-123',next='new-customer-123';
