@@ -1,122 +1,44 @@
+import worker from '../dist/server/index.js';
+import pg from 'pg';
 import fs from 'node:fs';
-import path from 'node:path';
-import { database } from '../scripts/sqlite-adapter.mjs';
-import { localBucket } from '../scripts/local-bucket.mjs';
-import { createWorker } from '../worker.mjs';
-
-let schema = '';
-try {
-  const schemaPath = path.join(process.cwd(), 'db', 'schema.sql');
-  if (fs.existsSync(schemaPath)) {
-    schema += fs.readFileSync(schemaPath, 'utf8') + '\n';
-  }
-  const drizzleDir = path.join(process.cwd(), 'drizzle');
-  if (fs.existsSync(drizzleDir)) {
-    const files = fs.readdirSync(drizzleDir).filter(f => f.endsWith('.sql')).sort();
-    for (const f of files) {
-      schema += fs.readFileSync(path.join(drizzleDir, f), 'utf8') + '\n';
-    }
-  }
-} catch (e) {
-  console.error('Error loading SQL schema:', e);
+import {rootCertificates} from 'node:tls';
+import {createClient} from '@supabase/supabase-js';
+import {postgresDatabase} from '../scripts/postgres-adapter.mjs';
+import {supabaseBucket} from '../scripts/supabase-bucket.mjs';
+import {initializePostgres} from '../scripts/postgres-schema.mjs';
+let environment;
+export function getEnvironment(config=process.env){
+ if(environment&&config===process.env)return environment;
+ const required={POSTGRES_URL:/^postgres(?:ql)?:\/\//.test(config.POSTGRES_URL||''),SUPABASE_URL:!!config.SUPABASE_URL,SUPABASE_SERVER_KEY:!!(config.SUPABASE_SECRET_KEY||config.SUPABASE_SERVICE_ROLE_KEY),ADMIN_USERNAME:!!config.ADMIN_USERNAME,ADMIN_PASSWORD_HASH:!!config.ADMIN_PASSWORD_HASH};
+ if(Object.values(required).some(v=>!v)){console.error('Missing deployment configuration:',Object.keys(required).filter(k=>!required[k]).join(', '));throw Error('Missing deployment configuration');}
+ const databaseURL=new URL(config.POSTGRES_URL);for(const key of ['sslmode','sslrootcert','sslcert','sslkey'])databaseURL.searchParams.delete(key);
+ const ca=fs.readFileSync(new URL('../scripts/supabase-ca.crt',import.meta.url),'utf8');
+ const pool=new pg.Pool({connectionString:databaseURL.toString(),ssl:{rejectUnauthorized:true,ca:[...rootCertificates,ca]},max:3,connectionTimeoutMillis:10000,idleTimeoutMillis:10000,types:{getTypeParser:(oid,format)=>oid===20?value=>Number(value):pg.types.getTypeParser(oid,format)}});
+ const storage=createClient(config.SUPABASE_URL,config.SUPABASE_SECRET_KEY||config.SUPABASE_SERVICE_ROLE_KEY,{auth:{persistSession:false,autoRefreshToken:false}});
+ const bucket=supabaseBucket(storage);
+ const env={DB:postgresDatabase(pool,()=>initializePostgres(pool)),BUCKET:bucket,ADMIN_USERNAME:config.ADMIN_USERNAME,ADMIN_PASSWORD_HASH:config.ADMIN_PASSWORD_HASH};
+ if(config===process.env)environment=env;return env;
 }
-
-const worker = createWorker({}, schema);
-
-const dbPath = process.env.SQLITE_PATH || path.join('/tmp', 'upsmart.sqlite');
-const bucketPath = process.env.BUCKET_PATH || path.join('/tmp', 'upsmart-bucket');
-
-let dbInstance = null;
-let bucketInstance = null;
-
-function getEnv() {
-  if (!dbInstance) dbInstance = database(dbPath);
-  if (!bucketInstance) bucketInstance = localBucket(bucketPath);
-  return {
-    DB: dbInstance,
-    BUCKET: bucketInstance,
-    ADMIN_USERNAME: process.env.ADMIN_USERNAME || 'upsmartvarginha',
-    ADMIN_PASSWORD_HASH: process.env.ADMIN_PASSWORD_HASH || '$2b$12$0v7tb/9Kr81XVohDdO5GPOFblxC48hl1VuZHY5r5NX2Gzg//ZOm/.'
-  };
-}
-
-async function readReqBody(req) {
-  if (req.body !== undefined && req.body !== null) {
-    if (Buffer.isBuffer(req.body)) return req.body;
-    if (typeof req.body === 'string') return Buffer.from(req.body);
-    if (typeof req.body === 'object') return Buffer.from(JSON.stringify(req.body));
+export function createHandler(app,getEnv){return async(req,res)=>{
+ try{
+  const headers=new Headers();for(const [key,value] of Object.entries(req.headers)){if(value!==undefined)headers.set(key,Array.isArray(value)?value.join(','):value);}
+  // Vercel replaces x-forwarded-for at its edge. Never accept a client's Cloudflare header.
+  headers.set('cf-connecting-ip',String(req.headers['x-forwarded-for']||'unknown').split(',')[0].trim());
+  const host=String(req.headers.host||'localhost');if(!/^[a-zA-Z0-9.:-]+$/.test(host))throw Error('Invalid host');
+  const url=new URL(req.url,'https://'+host);if(url.host!==host)throw Error('Invalid request URL');
+  let body;
+  if(!['GET','HEAD'].includes(req.method)){
+   if(req.body!==undefined&&req.body!==null)body=Buffer.isBuffer(req.body)?req.body:Buffer.from(typeof req.body==='string'?req.body:JSON.stringify(req.body));
+   else{const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>1100000){res.statusCode=413;res.end('Arquivo muito grande');return;}chunks.push(chunk);}body=Buffer.concat(chunks);}
+   if(body.length>1100000){res.statusCode=413;res.end('Arquivo muito grande');return;}
   }
-  if (typeof req[Symbol.asyncIterator] === 'function') {
-    const chunks = [];
-    for await (const chunk of req) {
-      chunks.push(chunk);
-    }
-    return Buffer.concat(chunks);
-  }
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    req.on('data', chunk => chunks.push(chunk));
-    req.on('end', () => resolve(Buffer.concat(chunks)));
-    req.on('error', reject);
-  });
-}
-
-export default async function handler(req, res) {
-  try {
-    const proto = req.headers['x-forwarded-proto'] || 'https';
-    const host = req.headers['host'] || 'localhost';
-    const fullUrl = `${proto}://${host}${req.url}`;
-
-    let body = null;
-    if (!['GET', 'HEAD'].includes(req.method)) {
-      body = await readReqBody(req);
-    }
-
-    const headers = new Headers();
-    for (const [key, val] of Object.entries(req.headers)) {
-      if (Array.isArray(val)) {
-        val.forEach(v => headers.append(key, v));
-      } else if (val !== undefined) {
-        headers.set(key, val);
-      }
-    }
-
-    if (!headers.has('cf-connecting-ip')) {
-      const clientIp = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket?.remoteAddress || '127.0.0.1';
-      headers.set('cf-connecting-ip', clientIp);
-    }
-
-    const webReq = new Request(fullUrl, {
-      method: req.method,
-      headers,
-      body
-    });
-
-    const env = getEnv();
-    const response = await worker.fetch(webReq, env);
-
-    res.statusCode = response.status;
-    
-    if (typeof response.headers.getSetCookie === 'function') {
-      const cookies = response.headers.getSetCookie();
-      if (cookies && cookies.length > 0) {
-        res.setHeader('Set-Cookie', cookies);
-      }
-    }
-    
-    response.headers.forEach((val, key) => {
-      if (key.toLowerCase() === 'set-cookie' && typeof response.headers.getSetCookie === 'function') {
-        return;
-      }
-      res.setHeader(key, val);
-    });
-
-    const arrayBuffer = await response.arrayBuffer();
-    res.end(Buffer.from(arrayBuffer));
-  } catch (err) {
-    console.error('API Error:', err);
-    res.statusCode = err.status || 500;
-    res.setHeader('Content-Type', 'application/json');
-    res.end(JSON.stringify({ error: err.message || 'Erro interno no servidor.' }));
-  }
-}
+  const response=await app.fetch(new Request(url,{method:req.method,headers,...(body?{body}:{} )}),getEnv());
+  res.statusCode=response.status;response.headers.forEach((value,key)=>{if(key!=='set-cookie')res.setHeader(key,value);});
+  const cookies=response.headers.getSetCookie();if(cookies.length)res.setHeader('Set-Cookie',cookies);
+  res.end(Buffer.from(await response.arrayBuffer()));
+ }catch(error){
+  console.error('Vercel handler failed',error.name,error.code||'RUNTIME');
+  res.statusCode=503;res.setHeader('Content-Type','application/json');res.setHeader('Cache-Control','no-store');res.end(JSON.stringify({error:'O site está sendo configurado. Tente novamente em instantes.'}));
+ }
+};}
+export default createHandler(worker,()=>getEnvironment());

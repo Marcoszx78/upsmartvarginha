@@ -1,30 +1,7 @@
 {
-  "buildCommand": "npm run build",
-  "outputDirectory": "dist",
-  "rewrites": [
-    {
-      "source": "/conta",
-      "destination": "/account.html"
-    },
-    {
-      "source": "/conta/",
-      "destination": "/account.html"
-    },
-    {
-      "source": "/admin",
-      "destination": "/admin.html"
-    },
-    {
-      "source": "/admin/",
-      "destination": "/admin.html"
-    },
-    {
-      "source": "/produto/:id",
-      "destination": "/product.html"
-    },
-    {
-      "source": "/api/:path*",
-      "destination": "/api"
-    }
-  ]
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "npm run build:vercel",
+  "outputDirectory": "vercel-public",
+  "functions": {"api/index.js": {"includeFiles": "dist/server/index.js", "maxDuration": 60}},
+  "rewrites": [{"source": "/(.*)", "destination": "/api"}]
 }

@@ -6,3 +6,9 @@ dist/.openai/
 node_modules/
 .env
 .env.local
+.env.*.local
+.vercel/
+vercel-public/
+
+.vercel
+.env*

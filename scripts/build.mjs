@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import {build} from 'esbuild';
 const assets={};
 for(const name of ['privacy.html','privacy.css','privacy.js','index.html','styles.css','app.js','admin.html','admin.css','admin.js','admin-uploads.js','account.html','account.css','account.js','profile.js','profile.css','theme.js','catalog.css','commerce.css','admin-extras.js','product.html','product.js','favorites.js','reviews.js','compare.html','compare.js','compare.css','security.js','assets/iphone-pro.jpg','assets/iphone-colors.jpg','assets/xiaomi.png','assets/playstation.png','assets/xbox.png','assets/fachada-up-smart.png']){
- const b=await fs.readFile('dist/'+name);const ext=name.split('.').pop();const binary=['jpg','png'].includes(ext);assets['/'+name]={body:binary?b.toString('base64'):b.toString('utf8'),binary,type:({html:'text/html; charset=utf-8',css:'text/css; charset=utf-8',js:'text/javascript; charset=utf-8',jpg:'image/jpeg',png:'image/png'})[ext]};
+ const b=await fs.readFile('dist/'+name);const ext=name.split('.').pop();const binary=['jpg','png'].includes(ext);let content=binary?b.toString('base64'):b.toString('utf8');if(name==='privacy.html'&&process.env.DEPLOY_TARGET==='vercel')content=content.replace('a plataforma Sites e infraestrutura Cloudflare','a Vercel para hospedagem e o Supabase para banco de dados e imagens');assets['/'+name]={body:content,binary,type:({html:'text/html; charset=utf-8',css:'text/css; charset=utf-8',js:'text/javascript; charset=utf-8',jpg:'image/jpeg',png:'image/png'})[ext]};
 }
 const schema=await fs.readFile('db/schema.sql','utf8');
 await fs.mkdir('dist/server',{recursive:true});await fs.mkdir('dist/.openai',{recursive:true});

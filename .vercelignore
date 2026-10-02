@@ -1,0 +1,11 @@
+.git
+.env
+.env.*
+work
+outputs
+.sites-runtime
+node_modules
+dist/server
+dist/.openai
+vercel-public
+tests
